@@ -1,0 +1,67 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: executive-console-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - private-app
+
+  backend:
+    build:
+      context: ./backend
+    container_name: executive-console-backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      PORT: 4000
+      MONGODB_URI: mongodb://mongo:27017/openclaw-console
+      CLIENT_ORIGIN: http://localhost:5173
+      APP_JWT_SECRET: ${APP_JWT_SECRET}
+      CEO_ACCESS_KEY: ${CEO_ACCESS_KEY}
+      OPENCLAW_GATEWAY_URL: ws://openclaw:18789
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      OPENCLAW_AGENT_ID: main
+      OPENCLAW_HANDSHAKE_TYPE: handshake
+      OPENCLAW_AGENT_REQUEST_TYPE: req:agent
+    ports:
+      - "4000:4000"
+    networks:
+      - private-app
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:4000/api
+        VITE_SOCKET_URL: http://localhost:4000
+    container_name: executive-console-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    networks:
+      - private-app
+
+  openclaw:
+    image: openclaw/gateway:latest
+    container_name: openclaw
+    restart: unless-stopped
+    environment:
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+    expose:
+      - "18789"
+    networks:
+      - private-app
+
+volumes:
+  mongo-data:
+
+networks:
+  private-app:
+    driver: bridge

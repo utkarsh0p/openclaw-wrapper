@@ -1,0 +1,106 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: OpenClaw Local Chat
+      - heading "Gateway Chat MVP" [level=1] [ref=e7]
+      - paragraph [ref=e8]: Simple chat surface over the local OpenClaw gateway. Messages route through the Node bridge, stream live activity, and keep run history in MongoDB.
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - paragraph [ref=e12]: MVP Interface
+          - heading "Chat with OpenClaw" [level=2] [ref=e13]
+          - paragraph [ref=e14]: Send a prompt to the local gateway and watch live tool and thinking events stream back into the chat.
+        - generic [ref=e15]:
+          - generic [ref=e18]: Queued
+          - generic [ref=e21]: Gateway connected
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - generic [ref=e24]:
+            - generic [ref=e25]:
+              - heading "Conversation" [level=3] [ref=e26]
+              - generic [ref=e27]: Run 0da31602-5399-4340-9352-480c5ece184e
+            - generic [ref=e28]:
+              - article [ref=e29]:
+                - generic [ref=e30]:
+                  - generic [ref=e31]: You
+                  - generic [ref=e32]: 5/5/2026, 4:01:22 PM
+                - paragraph [ref=e33]: "Reply with exactly: WORKING"
+              - article [ref=e34]:
+                - generic [ref=e35]:
+                  - generic [ref=e36]: OpenClaw
+                  - generic [ref=e37]: 5/5/2026, 4:01:22 PM
+                - paragraph [ref=e38]: "invalid chat.send params: at root: unexpected property 'metadata'"
+                - generic [ref=e39]:
+                  - generic [ref=e40]:
+                    - generic [ref=e41]: "Task accepted:"
+                    - text: Queued for OpenClaw execution.
+                  - generic [ref=e42]:
+                    - generic [ref=e43]: "Dispatch failed:"
+                    - text: "invalid chat.send params: at root: unexpected property 'metadata'"
+              - article [ref=e44]:
+                - generic [ref=e45]:
+                  - generic [ref=e46]: You
+                  - generic [ref=e47]: 5/5/2026, 4:01:38 PM
+                - paragraph [ref=e48]: "Reply with exactly: WORKING"
+              - article [ref=e49]:
+                - generic [ref=e50]:
+                  - generic [ref=e51]: OpenClaw
+                  - generic [ref=e52]: 5/5/2026, 4:01:38 PM
+                - paragraph [ref=e53]: "invalid chat.send params: at root: unexpected property 'metadata'"
+                - generic [ref=e54]:
+                  - generic [ref=e55]:
+                    - generic [ref=e56]: "Task accepted:"
+                    - text: Queued for OpenClaw execution.
+                  - generic [ref=e57]:
+                    - generic [ref=e58]: "Dispatch failed:"
+                    - text: "invalid chat.send params: at root: unexpected property 'metadata'"
+              - article [ref=e59]:
+                - generic [ref=e60]:
+                  - generic [ref=e61]: You
+                  - generic [ref=e62]: 5/5/2026, 4:01:55 PM
+                - paragraph [ref=e63]: "Reply with exactly: WORKING"
+              - article [ref=e64]:
+                - generic [ref=e65]:
+                  - generic [ref=e66]: OpenClaw
+                  - generic [ref=e67]: Queued
+                - paragraph [ref=e68]: OpenClaw is processing this message.
+                - generic [ref=e70]:
+                  - generic [ref=e71]: "Task accepted:"
+                  - text: Queued for OpenClaw execution.
+          - generic [ref=e72]:
+            - generic [ref=e73]: Message
+            - textbox "Ask OpenClaw something..." [ref=e74]
+            - generic [ref=e75]:
+              - paragraph [ref=e76]: "The backend forwards this prompt to the `main` OpenClaw agent over the local gateway."
+              - button "Send" [disabled] [ref=e77]
+        - complementary [ref=e78]:
+          - generic [ref=e79]:
+            - heading "Current Session" [level=3] [ref=e80]
+            - generic [ref=e81]:
+              - generic [ref=e82]:
+                - term [ref=e83]: Project
+                - definition [ref=e84]: Executive Growth Office
+              - generic [ref=e85]:
+                - term [ref=e86]: Agent
+                - definition [ref=e87]: main
+              - generic [ref=e88]:
+                - term [ref=e89]: Gateway
+                - definition [ref=e90]: ws://localhost:18789
+          - generic [ref=e91]:
+            - heading "Recent Runs" [level=3] [ref=e92]
+            - generic [ref=e93]:
+              - article [ref=e94]:
+                - paragraph [ref=e95]: "Reply with exactly: WORKING"
+                - generic [ref=e96]:
+                  - generic [ref=e97]: 5/5/2026, 4:01:55 PM
+                  - generic [ref=e98]: Queued
+              - article [ref=e99]:
+                - paragraph [ref=e100]: "Reply with exactly: WORKING"
+                - generic [ref=e101]:
+                  - generic [ref=e102]: 5/5/2026, 4:01:38 PM
+                  - generic [ref=e103]: Failed
+              - article [ref=e104]:
+                - paragraph [ref=e105]: "Reply with exactly: WORKING"
+                - generic [ref=e106]:
+                  - generic [ref=e107]: 5/5/2026, 4:01:22 PM
+                  - generic [ref=e108]: Failed

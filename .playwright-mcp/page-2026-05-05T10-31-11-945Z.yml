@@ -1,0 +1,44 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: OpenClaw Local Chat
+      - heading "Gateway Chat MVP" [level=1] [ref=e7]
+      - paragraph [ref=e8]: Simple chat surface over the local OpenClaw gateway. Messages route through the Node bridge, stream live activity, and keep run history in MongoDB.
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - paragraph [ref=e12]: MVP Interface
+          - heading "Chat with OpenClaw" [level=2] [ref=e13]
+          - paragraph [ref=e14]: Send a prompt to the local gateway and watch live tool and thinking events stream back into the chat.
+        - generic [ref=e15]:
+          - generic [ref=e18]: Idle
+          - generic [ref=e21]: Gateway connected
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - generic [ref=e24]:
+            - generic [ref=e25]:
+              - heading "Conversation" [level=3] [ref=e26]
+              - generic [ref=e27]: Ready
+            - generic [ref=e29]: No messages yet. Send a prompt to the local OpenClaw gateway.
+          - generic [ref=e30]:
+            - generic [ref=e31]: Message
+            - textbox "Ask OpenClaw something..." [ref=e32]
+            - generic [ref=e33]:
+              - paragraph [ref=e34]: "The backend forwards this prompt to the `main` OpenClaw agent over the local gateway."
+              - button "Send" [disabled] [ref=e35]
+        - complementary [ref=e36]:
+          - generic [ref=e37]:
+            - heading "Current Session" [level=3] [ref=e38]
+            - generic [ref=e39]:
+              - generic [ref=e40]:
+                - term [ref=e41]: Project
+                - definition [ref=e42]: Executive Growth Office
+              - generic [ref=e43]:
+                - term [ref=e44]: Agent
+                - definition [ref=e45]: main
+              - generic [ref=e46]:
+                - term [ref=e47]: Gateway
+                - definition [ref=e48]: ws://localhost:18789
+          - generic [ref=e49]:
+            - heading "Recent Runs" [level=3] [ref=e50]
+            - generic [ref=e52]: No run history yet.

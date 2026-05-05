@@ -1,0 +1,2 @@
+[      69ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=e57639b2:21550
+[     274ms] [WARNING] WebSocket connection to 'ws://localhost:4000/socket.io/?EIO=4&transport=websocket' failed: WebSocket is closed before the connection is established. @ http://localhost:5173/node_modules/.vite/deps/socket__io-client.js?v=e57639b2:1499
