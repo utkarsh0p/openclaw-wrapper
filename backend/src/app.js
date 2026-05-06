@@ -6,13 +6,14 @@ import { authRouter } from "./routes/authRoutes.js";
 import { projectRouter } from "./routes/projectRoutes.js";
 import { agentRouter } from "./routes/agentRoutes.js";
 import { requireAuth } from "./middleware/requireAuth.js";
+import { resolveAllowedOrigins } from "./utils/allowedOrigins.js";
 
 export function createApp() {
   const app = express();
 
   app.use(
     cors({
-      origin: process.env.CLIENT_ORIGIN?.split(",").map((origin) => origin.trim()) || true,
+      origin: resolveAllowedOrigins(),
       credentials: true,
     }),
   );

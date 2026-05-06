@@ -1,22 +1,28 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
-import { api } from "../lib/api.js";
-import { createSocket } from "../lib/socket.js";
+import { GatewayClient, getDefaultGatewayConfig, getGatewayStatusLabel } from "../lib/gateway.js";
 
 const STATUS_STYLES = {
-  idle: "bg-emerald-500 text-emerald-950",
-  queued: "bg-cyan-400 text-cyan-950",
-  thinking: "bg-sky-400 text-sky-950 animate-soft-pulse",
-  using_tools: "bg-amber-300 text-amber-950",
-  completed: "bg-emerald-500 text-emerald-950",
-  failed: "bg-rose-500 text-rose-50",
+  idle: "bg-[#efe4ff] text-[#5a2490]",
+  queued: "bg-[#d6f0ff] text-[#084f7a]",
+  thinking: "bg-[#dfff8f] text-[#214900]",
+  using_tools: "bg-[#ffd29f] text-[#7d3f00]",
+  completed: "bg-[#d1ffd9] text-[#085b1e]",
+  failed: "bg-[#ffd6dc] text-[#7c1027]",
 };
 
-function formatDate(value) {
-  return value ? new Date(value).toLocaleString() : "Live";
+function buildTimestampLabel() {
+  return new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatStatusLabel(status) {
+  if (!status) {
+    return "Idle";
+  }
+
   if (status === "using_tools") {
     return "Using tools";
   }
@@ -24,401 +30,406 @@ function formatStatusLabel(status) {
   return status.replace("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function inferConsoleStatus(run) {
-  if (!run) {
-    return "idle";
+function truncate(text, max = 100) {
+  if (!text) {
+    return "";
   }
 
-  return run.status || "idle";
+  return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
-function getRunId(run) {
-  return run._id || run.id;
-}
-
-function getSessionId(run) {
-  return run.sessionId || run.sessionKey || `legacy-${run.agentId || "main"}`;
-}
-
-function getSessionTitle(session) {
-  return session.title || "New session";
-}
-
-function getTimestamp(value) {
-  return value ? new Date(value).getTime() : 0;
-}
-
-function buildSessionMap(runs, sessions, project) {
-  const map = new Map();
-
-  (sessions || []).forEach((session) => {
-    const sessionId = session._id || session.id;
-    map.set(sessionId, {
-      ...session,
-      id: sessionId,
-      runs: [],
-    });
+export function AgentConsole() {
+  const [config, setConfig] = useState(getDefaultGatewayConfig);
+  const [gatewayState, setGatewayState] = useState({
+    phase: "idle",
+    connected: false,
+    url: config.url || "",
+    hello: null,
+    lastError: "",
   });
-
-  (runs || []).forEach((run) => {
-    const sessionId = getSessionId(run);
-    const existing = map.get(sessionId) || {
-      id: sessionId,
-      _id: run.sessionId || sessionId,
-      agentId: run.agentId || project?.primaryAgentId || "main",
-      sessionKey: run.sessionKey || null,
-      title: run.prompt?.slice(0, 48) || "Imported session",
-      createdAt: run.createdAt,
-      updatedAt: run.updatedAt,
-      lastRunAt: run.updatedAt || run.createdAt,
-      runs: [],
-    };
-
-    existing.runs.push(run);
-    existing.lastRunAt = getTimestamp(existing.lastRunAt) > getTimestamp(run.updatedAt || run.createdAt)
-      ? existing.lastRunAt
-      : run.updatedAt || run.createdAt;
-    map.set(sessionId, existing);
-  });
-
-  return Array.from(map.values())
-    .map((session) => ({
-      ...session,
-      runs: session.runs.slice().sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
-    }))
-    .sort((a, b) => getTimestamp(b.lastRunAt || b.createdAt) - getTimestamp(a.lastRunAt || a.createdAt));
-}
-
-function buildConversation(session) {
-  if (!session) {
-    return [];
-  }
-
-  return session.runs.flatMap((run) => {
-    const items = [
-      {
-        id: `${getRunId(run)}-user`,
-        role: "user",
-        body: run.prompt,
-        meta: formatDate(run.createdAt),
-      },
-    ];
-
-    const lastEvent = run.liveEvents?.[run.liveEvents.length - 1];
-    const responseText =
-      run.finalSummary ||
-      run.businessReport ||
-      (run.status === "failed" ? lastEvent?.message : "");
-
-    if (responseText) {
-      items.push({
-        id: `${getRunId(run)}-assistant`,
-        role: "assistant",
-        body: responseText,
-        meta: run.completedAt ? formatDate(run.completedAt) : formatStatusLabel(run.status || "idle"),
-        status: run.status,
-        events: run.liveEvents || [],
-      });
-    } else {
-      items.push({
-        id: `${getRunId(run)}-assistant-pending`,
-        role: "assistant",
-        body: "OpenClaw is processing this message.",
-        meta: formatStatusLabel(run.status || "queued"),
-        status: run.status,
-        events: run.liveEvents || [],
-      });
-    }
-
-    return items;
-  });
-}
-
-export function AgentConsole({ project, initialRuns, initialSessions, gateway }) {
+  const [messages, setMessages] = useState([]);
   const [prompt, setPrompt] = useState("");
-  const [runs, setRuns] = useState(initialRuns || []);
-  const [sessions, setSessions] = useState(initialSessions || []);
-  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [rawEvents, setRawEvents] = useState([]);
   const [submitting, setSubmitting] = useState(false);
-  const [creatingSession, setCreatingSession] = useState(false);
+  const [activeAssistantId, setActiveAssistantId] = useState(null);
+
+  const clientRef = useRef(null);
+  const runToMessageRef = useRef(new Map());
+  const sessionToMessageRef = useRef(new Map());
+  const activeAssistantIdRef = useRef(null);
 
   useEffect(() => {
-    setRuns(initialRuns || []);
-  }, [initialRuns]);
+    activeAssistantIdRef.current = activeAssistantId;
+  }, [activeAssistantId]);
 
-  useEffect(() => {
-    setSessions(initialSessions || []);
-  }, [initialSessions]);
+  if (!clientRef.current) {
+    clientRef.current = new GatewayClient({
+      onStateChange: setGatewayState,
+      onFrame: (frame) => {
+        setRawEvents((current) => [frame, ...current].slice(0, 12));
+      },
+      onEvent: (normalized) => {
+        setMessages((current) => {
+          const next = [...current];
+          const messageId =
+            (normalized.runId && runToMessageRef.current.get(normalized.runId)) ||
+            (normalized.sessionKey && sessionToMessageRef.current.get(normalized.sessionKey)) ||
+            activeAssistantIdRef.current;
 
-  const sessionList = useMemo(() => buildSessionMap(runs, sessions, project), [runs, sessions, project]);
+          if (!messageId) {
+            return current;
+          }
 
-  useEffect(() => {
-    if (!sessionList.length) {
-      setActiveSessionId(null);
-      return;
-    }
+          const index = next.findIndex((entry) => entry.id === messageId);
+          if (index === -1) {
+            return current;
+          }
 
-    if (!activeSessionId || !sessionList.find((session) => session.id === activeSessionId)) {
-      setActiveSessionId(sessionList[0].id);
-    }
-  }, [activeSessionId, sessionList]);
+          const existing = next[index];
+          const nextBody =
+            normalized.title === "OpenClaw reply" && normalized.message
+              ? `${existing.body}${normalized.message}`
+              : existing.body || (normalized.status === "failed" ? normalized.message : "");
 
-  useEffect(() => {
-    if (!project?._id && !project?.id) {
-      return undefined;
-    }
+          next[index] = {
+            ...existing,
+            body: nextBody,
+            status: normalized.status,
+            runId: normalized.runId || existing.runId || null,
+            sessionKey: normalized.sessionKey || existing.sessionKey || null,
+            updatedAt: buildTimestampLabel(),
+            events: [...existing.events, normalized].slice(-8),
+          };
 
-    const projectId = project._id || project.id;
-    const socket = createSocket();
+          if (normalized.runId) {
+            runToMessageRef.current.set(normalized.runId, messageId);
+          }
 
-    socket.emit("project:subscribe", projectId);
-
-    socket.on("agent:event", ({ run }) => {
-      setRuns((currentRuns) => {
-        const nextRuns = [...currentRuns];
-        const index = nextRuns.findIndex((entry) => getRunId(entry) === run.id);
-
-        if (index >= 0) {
-          nextRuns[index] = { ...nextRuns[index], ...run };
-          return nextRuns;
-        }
-
-        return [run, ...nextRuns];
-      });
+          return next;
+        });
+      },
     });
+  }
 
+  useEffect(() => {
     return () => {
-      socket.disconnect();
+      clientRef.current?.disconnect();
     };
-  }, [project]);
+  }, []);
 
-  const activeSession = sessionList.find((session) => session.id === activeSessionId) || null;
-  const activeRun = activeSession?.runs?.[activeSession.runs.length - 1] || null;
-  const conversation = useMemo(() => buildConversation(activeSession), [activeSession]);
-  const status = inferConsoleStatus(activeRun);
+  const connectionLabel = getGatewayStatusLabel(gatewayState);
+  const latestAssistant = useMemo(
+    () => [...messages].reverse().find((entry) => entry.role === "assistant") || null,
+    [messages],
+  );
+  const latestStatus = latestAssistant?.status || "idle";
 
-  async function handleCreateSession() {
-    if (!project) {
-      return;
-    }
-
-    setCreatingSession(true);
+  async function handleConnect(event) {
+    event.preventDefault();
 
     try {
-      const projectId = project._id || project.id;
-      const response = await api.post(`/agent/projects/${projectId}/sessions`);
-      const nextSession = response.data.session;
-
-      setSessions((currentSessions) => [nextSession, ...currentSessions.filter((entry) => (entry._id || entry.id) !== (nextSession._id || nextSession.id))]);
-      setActiveSessionId(nextSession._id || nextSession.id);
-    } finally {
-      setCreatingSession(false);
+      await clientRef.current.connect({
+        url: config.url,
+        token: config.token,
+      });
+    } catch (_error) {
+      // state is already updated inside the client
     }
+  }
+
+  function handleDisconnect() {
+    clientRef.current.disconnect();
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
-    if (!prompt.trim() || !project) {
+    if (!prompt.trim() || !gatewayState.connected) {
       return;
     }
 
+    const sessionKey = `agent:${config.agentId || "main"}:main`;
+    const assistantId = crypto.randomUUID();
+    const nowLabel = buildTimestampLabel();
+
+    setMessages((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        body: prompt.trim(),
+        status: "completed",
+        updatedAt: nowLabel,
+        events: [],
+      },
+      {
+        id: assistantId,
+        role: "assistant",
+        body: "",
+        status: "queued",
+        updatedAt: nowLabel,
+        runId: null,
+        sessionKey,
+        events: [],
+      },
+    ]);
+
+    sessionToMessageRef.current.set(sessionKey, assistantId);
+    setActiveAssistantId(assistantId);
     setSubmitting(true);
 
     try {
-      const projectId = project._id || project.id;
-      const response = await api.post(`/agent/projects/${projectId}/command`, {
-        prompt,
-        sessionId: activeSession?._id || activeSession?.id || null,
+      const dispatch = await clientRef.current.sendChat({
+        prompt: prompt.trim(),
+        agentId: config.agentId || "main",
       });
 
-      const createdRun = response.data.run;
-      const updatedSession = response.data.session;
-
-      setRuns((currentRuns) => [createdRun, ...currentRuns]);
-      if (updatedSession) {
-        setSessions((currentSessions) => [updatedSession, ...currentSessions.filter((entry) => (entry._id || entry.id) !== (updatedSession._id || updatedSession.id))]);
-        setActiveSessionId(updatedSession._id || updatedSession.id);
+      if (dispatch.runId) {
+        runToMessageRef.current.set(dispatch.runId, assistantId);
       }
+
+      setMessages((current) =>
+        current.map((entry) =>
+          entry.id === assistantId
+            ? {
+                ...entry,
+                runId: dispatch.runId || entry.runId,
+                sessionKey: dispatch.sessionKey || entry.sessionKey,
+                updatedAt: buildTimestampLabel(),
+              }
+            : entry,
+        ),
+      );
+
       setPrompt("");
+    } catch (error) {
+      setMessages((current) =>
+        current.map((entry) =>
+          entry.id === assistantId
+            ? {
+                ...entry,
+                body: error.message,
+                status: "failed",
+                updatedAt: buildTimestampLabel(),
+              }
+            : entry,
+        ),
+      );
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <section className="rounded-[2rem] border border-white/10 bg-panel/80 p-6 shadow-neon backdrop-blur">
-      <div className="mb-6 flex flex-col gap-4 border-b border-white/10 pb-6 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.4em] text-sky-200/70">MVP Interface</p>
-          <h2 className="font-display text-3xl text-white">Chat with OpenClaw</h2>
-          <p className="mt-2 max-w-2xl text-sm text-slate-300">
-            Each session stays separate, keeps its own history, and routes to the matching OpenClaw agent thread.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className={`inline-flex items-center gap-3 rounded-full px-4 py-2 text-sm font-semibold ${STATUS_STYLES[status]}`}>
-            <span className="h-2.5 w-2.5 rounded-full bg-current" />
-            <span>{formatStatusLabel(status)}</span>
+    <section className="space-y-6">
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_1.25fr]">
+        <div className="rounded-[2rem] bg-[#3d065f] p-6 text-white shadow-[0_30px_70px_rgba(61,6,95,0.28)]">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.35em] text-[#d9b6ff]">Connection</p>
+              <h2 className="mt-2 font-display text-4xl leading-none">Gateway Setup</h2>
+            </div>
+            <div className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold ${gatewayState.connected ? "bg-white text-[#3d065f]" : "bg-white/10 text-[#f7e9ff]"}`}>
+              <span className={`h-2.5 w-2.5 rounded-full ${gatewayState.connected ? "bg-[#2eb84d]" : "bg-[#ffb75f]"}`} />
+              <span>{connectionLabel}</span>
+            </div>
           </div>
-          <div className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold ${gateway?.connected ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-rose-400/30 bg-rose-400/10 text-rose-200"}`}>
-            <span className={`h-2 w-2 rounded-full ${gateway?.connected ? "bg-emerald-300" : "bg-rose-300"}`} />
-            <span>{gateway?.connected ? "Gateway connected" : "Gateway disconnected"}</span>
-          </div>
-        </div>
-      </div>
 
-      <div className="grid gap-6 lg:grid-cols-[0.6fr_1.35fr_0.55fr]">
-        <aside className="rounded-3xl border border-white/10 bg-slate-950/50 p-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h3 className="text-lg font-semibold text-white">Sessions</h3>
-            <button
-              type="button"
-              onClick={handleCreateSession}
-              disabled={creatingSession}
-              className="rounded-full border border-sky-300/30 px-3 py-1.5 text-xs font-semibold text-sky-100 transition hover:bg-sky-300/10 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {creatingSession ? "Creating..." : "New session"}
-            </button>
-          </div>
-          <div className="space-y-3">
-            {sessionList.length > 0 ? (
-              sessionList.map((session) => {
-                const sessionRun = session.runs[session.runs.length - 1];
-                const sessionStatus = sessionRun?.status || "idle";
-                const selected = session.id === activeSessionId;
+          <form onSubmit={handleConnect} className="mt-6 space-y-4">
+            <div>
+              <label className="block text-xs uppercase tracking-[0.2em] text-[#d9b6ff]">Gateway URL</label>
+              <input
+                type="text"
+                value={config.url}
+                onChange={(event) => setConfig((current) => ({ ...current, url: event.target.value }))}
+                placeholder="ws://localhost:18789"
+                className="mt-2 w-full rounded-[1.35rem] border border-white/15 bg-white/10 px-4 py-3 text-sm text-white placeholder:text-white/50 outline-none transition focus:border-[#ffd29f]"
+              />
+            </div>
 
-                return (
-                  <button
-                    key={session.id}
-                    type="button"
-                    onClick={() => setActiveSessionId(session.id)}
-                    className={`block w-full rounded-2xl border px-4 py-3 text-left transition ${selected ? "border-sky-300/60 bg-sky-300/10" : "border-white/10 bg-slate-900/70 hover:border-white/20"}`}
-                  >
-                    <p className="text-sm font-medium text-slate-100">{getSessionTitle(session)}</p>
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <span className="text-xs text-slate-400">{formatDate(session.lastRunAt || session.createdAt)}</span>
-                      <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${STATUS_STYLES[sessionStatus]}`}>{formatStatusLabel(sessionStatus)}</span>
-                    </div>
-                    <p className="mt-2 text-xs text-slate-400">{session.agentId || project.primaryAgentId || "main"}</p>
-                  </button>
-                );
-              })
-            ) : (
-              <div className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-slate-400">
-                No sessions yet. Create one and start chatting.
+            <div>
+              <label className="block text-xs uppercase tracking-[0.2em] text-[#d9b6ff]">Gateway Token</label>
+              <input
+                type="password"
+                value={config.token}
+                onChange={(event) => setConfig((current) => ({ ...current, token: event.target.value }))}
+                placeholder="Required by the gateway"
+                className="mt-2 w-full rounded-[1.35rem] border border-white/15 bg-white/10 px-4 py-3 text-sm text-white placeholder:text-white/50 outline-none transition focus:border-[#ffd29f]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase tracking-[0.2em] text-[#d9b6ff]">Agent ID</label>
+              <input
+                type="text"
+                value={config.agentId}
+                onChange={(event) => setConfig((current) => ({ ...current, agentId: event.target.value }))}
+                placeholder="main"
+                className="mt-2 w-full rounded-[1.35rem] border border-white/15 bg-white/10 px-4 py-3 text-sm text-white placeholder:text-white/50 outline-none transition focus:border-[#ffd29f]"
+              />
+            </div>
+
+            {gatewayState.lastError ? (
+              <div className="rounded-[1.2rem] bg-[#ffd6dc] px-4 py-3 text-sm text-[#7c1027]">
+                {gatewayState.lastError}
               </div>
-            )}
-          </div>
-        </aside>
+            ) : null}
 
-        <div className="space-y-6">
-          <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-white">{activeSession ? getSessionTitle(activeSession) : "Current session"}</h3>
-              <span className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                {activeRun ? `Run ${activeRun.openClawRunId || "pending"}` : activeSession ? "Session ready" : "Ready"}
-              </span>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="submit"
+                className="rounded-full bg-[#0a0a0a] px-5 py-3 text-sm font-semibold uppercase tracking-[0.15em] text-white transition hover:bg-[#181818]"
+              >
+                Connect
+              </button>
+              <button
+                type="button"
+                onClick={handleDisconnect}
+                className="rounded-full border border-white/20 px-5 py-3 text-sm font-semibold uppercase tracking-[0.15em] text-white/90 transition hover:bg-white/10"
+              >
+                Disconnect
+              </button>
             </div>
-            <div className="max-h-[34rem] space-y-4 overflow-y-auto pr-1">
-              {conversation.length > 0 ? (
-                conversation.map((entry) => (
-                  <article key={entry.id} className={`max-w-[88%] rounded-3xl px-4 py-3 ${entry.role === "user" ? "ml-auto bg-sky-300 text-slate-950" : "border border-white/10 bg-slate-900/80 text-slate-100"}`}>
-                    <div className="mb-2 flex items-center justify-between gap-4">
-                      <span className="text-xs font-semibold uppercase tracking-[0.25em] opacity-70">{entry.role === "user" ? "You" : "OpenClaw"}</span>
-                      <span className="text-xs opacity-70">{entry.meta}</span>
-                    </div>
-                    <p className="whitespace-pre-wrap text-sm leading-6">{entry.body}</p>
-                    {entry.role === "assistant" && entry.status && entry.status !== "completed" ? (
-                      <div className="mt-3 space-y-2 border-t border-white/10 pt-3">
-                        {(entry.events || []).slice(-3).map((event, index) => (
-                          <div key={`${entry.id}-${event.rawType}-${index}`} className="rounded-2xl bg-white/5 px-3 py-2 text-xs text-slate-300">
-                            <span className="font-semibold text-sky-100">{event.title}:</span> {event.message}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </article>
-                ))
-              ) : (
-                <div className="rounded-2xl border border-dashed border-white/10 p-6 text-sm text-slate-400">
-                  {activeSession ? "No messages in this session yet." : "No active session selected."}
-                </div>
-              )}
+          </form>
+
+          <dl className="mt-6 grid gap-3 rounded-[1.6rem] bg-white/10 p-4 text-sm text-[#f7e9ff]">
+            <div className="flex items-start justify-between gap-4">
+              <dt className="text-white/60">Protocol</dt>
+              <dd>Gateway WS v3</dd>
+            </div>
+            <div className="flex items-start justify-between gap-4">
+              <dt className="text-white/60">Role</dt>
+              <dd>operator</dd>
+            </div>
+            <div className="flex items-start justify-between gap-4">
+              <dt className="text-white/60">Session Key</dt>
+              <dd className="max-w-[14rem] text-right break-all">{`agent:${config.agentId || "main"}:main`}</dd>
+            </div>
+            <div className="flex items-start justify-between gap-4">
+              <dt className="text-white/60">Hello</dt>
+              <dd>{gatewayState.hello ? "Received" : "Waiting"}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="rounded-[2rem] bg-[linear-gradient(180deg,_#083f38_0%,_#0f564d_100%)] p-6 text-white shadow-[0_30px_70px_rgba(8,63,56,0.2)]">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.35em] text-[#b9f6ee]">Prompting</p>
+              <h2 className="mt-2 font-display text-4xl leading-none">Plain User Flow</h2>
+            </div>
+            <div className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold ${STATUS_STYLES[latestStatus] || STATUS_STYLES.idle}`}>
+              <span className="h-2.5 w-2.5 rounded-full bg-current" />
+              <span>{formatStatusLabel(latestStatus)}</span>
             </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="rounded-3xl border border-white/10 bg-slate-950/50 p-5">
-            <label className="mb-3 block text-sm font-medium text-slate-200">Message</label>
+          <form onSubmit={handleSubmit} className="mt-6 rounded-[1.8rem] bg-white/10 p-4">
+            <label className="block text-xs uppercase tracking-[0.2em] text-[#c9fff7]">Message</label>
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              rows={4}
-              placeholder={activeSession ? "Ask OpenClaw something..." : "Create or pick a session first..."}
-              className="w-full rounded-2xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-sky-300"
+              rows={5}
+              placeholder="Ask OpenClaw something through the VPS-hosted gateway..."
+              className="mt-3 w-full rounded-[1.35rem] border border-white/15 bg-white/10 px-4 py-4 text-sm text-white placeholder:text-white/55 outline-none transition focus:border-[#dfff8f]"
             />
-            <div className="mt-4 flex items-center justify-between gap-4">
-              <p className="text-xs text-slate-400">
-                {activeSession
-                  ? `Messages in this thread go to ${activeSession.agentId || project.primaryAgentId || "main"} and stay in session history.`
-                  : "Create a session to start a new OpenClaw thread."}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+              <p className="max-w-xl text-xs leading-5 text-[#d6fff8]">
+                This live MVP path avoids auth, employee roles, and backend-run project storage. It is only meant to prove direct frontend-to-gateway control.
               </p>
               <button
                 type="submit"
-                disabled={submitting || !prompt.trim() || !gateway?.connected || !activeSession}
-                className="rounded-full bg-sky-300 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+                disabled={submitting || !prompt.trim() || !gatewayState.connected}
+                className="rounded-full bg-[#dfff8f] px-5 py-3 text-sm font-semibold uppercase tracking-[0.15em] text-[#143214] transition hover:bg-[#efffc0] disabled:cursor-not-allowed disabled:bg-white/20 disabled:text-white/45"
               >
-                {submitting ? "Sending..." : "Send"}
+                {submitting ? "Sending" : "Send Prompt"}
               </button>
             </div>
           </form>
         </div>
+      </div>
 
-        <aside className="space-y-6">
-          <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-5">
-            <h3 className="text-lg font-semibold text-white">Current Session</h3>
-            <dl className="mt-4 space-y-3 text-sm text-slate-300">
-              <div className="flex items-start justify-between gap-4">
-                <dt className="text-slate-400">Project</dt>
-                <dd className="text-right text-slate-100">{project.name}</dd>
-              </div>
-              <div className="flex items-start justify-between gap-4">
-                <dt className="text-slate-400">Agent</dt>
-                <dd className="text-right text-slate-100">{activeSession?.agentId || project.primaryAgentId || "main"}</dd>
-              </div>
-              <div className="flex items-start justify-between gap-4">
-                <dt className="text-slate-400">Session key</dt>
-                <dd className="max-w-[12rem] break-all text-right text-slate-100">{activeSession?.sessionKey || "Not created yet"}</dd>
-              </div>
-              <div className="flex items-start justify-between gap-4">
-                <dt className="text-slate-400">Gateway</dt>
-                <dd className="text-right text-slate-100">{gateway?.url || "Unknown"}</dd>
-              </div>
-            </dl>
+      <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
+        <div className="rounded-[2rem] bg-[linear-gradient(180deg,_#fff9f4_0%,_#fff1e3_100%)] p-6 shadow-[0_25px_60px_rgba(133,73,28,0.12)]">
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.35em] text-[#b86629]">Conversation</p>
+              <h3 className="mt-2 font-display text-3xl leading-none text-[#3d065f]">Live Session</h3>
+            </div>
+            <span className="rounded-full bg-[#3d065f] px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white">
+              {messages.length ? `${messages.length} messages` : "Ready"}
+            </span>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-5">
-            <h3 className="mb-4 text-lg font-semibold text-white">Session History</h3>
-            <div className="space-y-3">
-              {activeSession?.runs?.length ? (
-                activeSession.runs
-                  .slice()
-                  .reverse()
-                  .map((run) => {
-                    const runStatus = run.status || "idle";
+          <div className="max-h-[40rem] space-y-4 overflow-y-auto pr-1">
+            {messages.length > 0 ? (
+              messages.map((entry) => (
+                <article
+                  key={entry.id}
+                  className={`max-w-[88%] rounded-[1.8rem] px-4 py-4 shadow-sm ${
+                    entry.role === "user"
+                      ? "ml-auto bg-[#3d065f] text-white"
+                      : "border border-[#f2d7bd] bg-white text-[#2d2338]"
+                  }`}
+                >
+                  <div className="mb-2 flex items-center justify-between gap-4">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.2em] opacity-70">
+                      {entry.role === "user" ? "User" : "OpenClaw"}
+                    </span>
+                    <span className="text-[11px] opacity-70">{entry.updatedAt}</span>
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm leading-6">
+                    {entry.body || (entry.role === "assistant" ? "Waiting for OpenClaw..." : "")}
+                  </p>
 
-                    return (
-                      <article key={getRunId(run)} className="rounded-2xl border border-white/10 bg-slate-900/70 px-4 py-3">
-                        <p className="text-sm font-medium text-slate-100">{run.prompt}</p>
-                        <div className="mt-2 flex items-center justify-between gap-3">
-                          <span className="text-xs text-slate-400">{formatDate(run.createdAt)}</span>
-                          <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${STATUS_STYLES[runStatus]}`}>{formatStatusLabel(runStatus)}</span>
+                  {entry.role === "assistant" && entry.events.length > 0 ? (
+                    <div className="mt-4 space-y-2 border-t border-[#f2d7bd] pt-3">
+                      {entry.events.slice(-3).map((event, index) => (
+                        <div key={`${entry.id}-${event.rawType}-${index}`} className="rounded-[1.2rem] bg-[#fff6ec] px-3 py-2 text-xs text-[#6d4a54]">
+                          <span className="font-semibold text-[#3d065f]">{event.title}:</span> {event.message}
                         </div>
-                      </article>
-                    );
-                  })
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              ))
+            ) : (
+              <div className="rounded-[1.6rem] border border-dashed border-[#edc79d] bg-white/70 p-6 text-sm text-[#8b5e4e]">
+                No prompt has been sent yet. Connect to the gateway and start the first plain-user interaction.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <aside className="space-y-6">
+          <div className="rounded-[2rem] bg-[linear-gradient(180deg,_#d8b4ff_0%,_#f1d6ff_100%)] p-5 shadow-[0_25px_60px_rgba(90,36,144,0.12)]">
+            <p className="text-xs uppercase tracking-[0.35em] text-[#6d319f]">Current Focus</p>
+            <h3 className="mt-2 font-display text-3xl leading-none text-[#3d065f]">Scope Guardrails</h3>
+            <ul className="mt-4 space-y-3 text-sm leading-6 text-[#5b3766]">
+              <li>One plain user only.</li>
+              <li>Direct frontend-to-gateway connection.</li>
+              <li>No auth, no employee roles, no admin flows yet.</li>
+              <li>No project creation or assignment layer in this live path.</li>
+            </ul>
+          </div>
+
+          <div className="rounded-[2rem] bg-[linear-gradient(180deg,_#cfe6ff_0%,_#eef7ff_100%)] p-5 shadow-[0_25px_60px_rgba(8,79,122,0.12)]">
+            <p className="text-xs uppercase tracking-[0.35em] text-[#0d5b8f]">Gateway Frames</p>
+            <h3 className="mt-2 font-display text-3xl leading-none text-[#154673]">Recent Events</h3>
+            <div className="mt-4 space-y-3">
+              {rawEvents.length > 0 ? (
+                rawEvents.map((frame, index) => (
+                  <article key={`${frame.type || "frame"}-${index}`} className="rounded-[1.3rem] bg-white/75 px-4 py-3 text-xs text-[#21506f]">
+                    <p className="font-semibold uppercase tracking-[0.14em] text-[#0d5b8f]">
+                      {frame.type === "event" ? frame.event : frame.type}
+                    </p>
+                    <p className="mt-2 whitespace-pre-wrap break-words leading-5">
+                      {truncate(JSON.stringify(frame.payload || frame, null, 2), 220)}
+                    </p>
+                  </article>
+                ))
               ) : (
-                <div className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-slate-400">
-                  No history in this session yet.
+                <div className="rounded-[1.3rem] bg-white/75 px-4 py-3 text-xs text-[#21506f]">
+                  No gateway frames captured yet.
                 </div>
               )}
             </div>

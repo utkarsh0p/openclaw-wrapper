@@ -2,7 +2,6 @@ import express from "express";
 import createError from "http-errors";
 
 import { AgentRun } from "../models/AgentRun.js";
-import { AgentSession } from "../models/AgentSession.js";
 import { CompanyProject } from "../models/CompanyProject.js";
 
 export const projectRouter = express.Router();
@@ -44,12 +43,8 @@ projectRouter.get("/:projectId/runs", async (req, res, next) => {
       throw createError(404, "Project not found");
     }
 
-    const [runs, sessions] = await Promise.all([
-      AgentRun.find({ project: project._id }).sort({ createdAt: -1 }).limit(100),
-      AgentSession.find({ project: project._id }).sort({ lastRunAt: -1, createdAt: -1 }).limit(50),
-    ]);
-
-    res.json({ project, runs, sessions });
+    const runs = await AgentRun.find({ project: project._id }).sort({ createdAt: -1 }).limit(50);
+    res.json({ project, runs });
   } catch (error) {
     next(error);
   }

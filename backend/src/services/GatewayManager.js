@@ -117,17 +117,14 @@ class GatewayManager extends EventEmitter {
     this.ws.send(JSON.stringify(payload));
   }
 
-  getSessionKey(agentId = process.env.OPENCLAW_AGENT_ID || "main", sessionId = "main") {
-    if (sessionId === "main") {
-      return `agent:${agentId}:main`;
-    }
-
-    return `agent:${agentId}:web:channel:${sessionId}`;
+  getSessionKey(agentId = process.env.OPENCLAW_AGENT_ID || "main") {
+    return `agent:${agentId}:main`;
   }
 
-  async dispatchTask({ agentId, prompt, sessionKey, projectId, localRunId, requestId = uuidv4(), openClawRunId = uuidv4() }) {
+  async dispatchTask({ agentId, prompt, projectId, localRunId, requestId = uuidv4(), openClawRunId = uuidv4() }) {
     await this.connect();
 
+    const sessionKey = this.getSessionKey(agentId);
     const response = await this.sendRequest("chat.send", {
       sessionKey,
       message: prompt,

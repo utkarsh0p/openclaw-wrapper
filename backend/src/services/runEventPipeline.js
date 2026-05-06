@@ -1,5 +1,4 @@
 import { AgentRun } from "../models/AgentRun.js";
-import { AgentSession } from "../models/AgentSession.js";
 import { CompanyProject } from "../models/CompanyProject.js";
 import { getSocketServer } from "../socket/index.js";
 import { gatewayManager } from "./GatewayManager.js";
@@ -9,8 +8,6 @@ function serializeRun(run) {
     id: run._id.toString(),
     project: run.project.toString(),
     agentId: run.agentId,
-    sessionId: run.sessionId?.toString?.() || run.sessionId,
-    sessionKey: run.sessionKey,
     openClawRunId: run.openClawRunId,
     prompt: run.prompt,
     status: run.status,
@@ -36,7 +33,7 @@ async function appendEventToRun(normalized) {
   const query = normalized.runId
     ? { openClawRunId: normalized.runId }
     : normalized.sessionKey
-      ? { sessionKey: normalized.sessionKey, status: { $in: ["queued", "thinking", "using_tools"] } }
+      ? { agentId: normalized.sessionKey.split(":")[1], status: { $in: ["queued", "thinking", "using_tools"] } }
       : { gatewayRequestId: normalized.requestId };
 
   const run = await AgentRun.findOne(query);
@@ -74,9 +71,6 @@ async function appendEventToRun(normalized) {
   }
 
   await run.save();
-  await AgentSession.findByIdAndUpdate(run.sessionId, {
-    lastRunAt: run.completedAt || run.updatedAt || new Date(),
-  });
 
   const io = getSocketServer();
   const payload = {

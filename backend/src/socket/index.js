@@ -1,12 +1,14 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 
+import { resolveAllowedOrigins } from "../utils/allowedOrigins.js";
+
 let io;
 
 export function initializeSocketServer(server) {
   io = new Server(server, {
     cors: {
-      origin: process.env.CLIENT_ORIGIN?.split(",").map((origin) => origin.trim()) || true,
+      origin: resolveAllowedOrigins(),
       credentials: true,
     },
   });

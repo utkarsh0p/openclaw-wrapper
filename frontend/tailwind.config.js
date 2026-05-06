@@ -23,11 +23,10 @@ export default {
         },
       },
       fontFamily: {
-        display: ["Georgia", "serif"],
-        body: ["ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["Impact", "Haettenschweiler", "\"Arial Narrow Bold\"", "sans-serif"],
+        body: ["\"Trebuchet MS\"", "\"Segoe UI\"", "sans-serif"],
       },
     },
   },
   plugins: [],
 };
-

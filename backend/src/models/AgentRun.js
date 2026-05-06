@@ -47,17 +47,6 @@ const agentRunSchema = new mongoose.Schema(
       type: String,
       default: process.env.OPENCLAW_AGENT_ID || "main",
     },
-    sessionId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "AgentSession",
-      required: true,
-      index: true,
-    },
-    sessionKey: {
-      type: String,
-      required: true,
-      index: true,
-    },
     openClawRunId: {
       type: String,
       index: true,
